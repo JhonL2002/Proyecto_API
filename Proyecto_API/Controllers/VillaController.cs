@@ -1,6 +1,8 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using AutoMapper;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.JsonPatch;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Proyecto_API.Data;
 using Proyecto_API.Models;
 using Proyecto_API.Models.Dto;
@@ -14,10 +16,12 @@ namespace Proyecto_API.Controllers
         //Inyección de dependencias
         private readonly ILogger<VillaController> _logger;
         private readonly ApplicationDbContext _db;
-        public VillaController(ILogger<VillaController> logger, ApplicationDbContext db)
+        private readonly IMapper _mapper;
+        public VillaController(ILogger<VillaController> logger, ApplicationDbContext db, IMapper mapper)
         {
             _logger = logger;
             _db = db;
+            _mapper = mapper;
         }
 
 
@@ -25,11 +29,14 @@ namespace Proyecto_API.Controllers
         //Endpoint que trae las villas
         [HttpGet]
         [ProducesResponseType(200)]
-        public ActionResult<IEnumerable<VillaDto>> GetVillas()
+        public async Task<ActionResult<IEnumerable<VillaDto>>> GetVillas()
         {
             _logger.LogInformation("Obtener las villas ");
+
+            IEnumerable<Villa> villaList = await _db.Villas.ToListAsync();
+
             //Invoca los datos de la clase VillaStore
-            return Ok(_db.Villas.ToList());
+            return Ok(_mapper.Map<IEnumerable<VillaDto>>(villaList));
         }
 
 
@@ -38,7 +45,7 @@ namespace Proyecto_API.Controllers
         [ProducesResponseType(200)]
         [ProducesResponseType(400)]
         [ProducesResponseType(404)]
-        public ActionResult<VillaDto> GetVilla(int id)
+        public async Task<ActionResult<VillaDto>> GetVilla(int id)
         {
             if (id==0)
             {
@@ -46,12 +53,12 @@ namespace Proyecto_API.Controllers
                 return BadRequest();
             }
             //var villa = VillaStore.villaList.FirstOrDefault(v => v.Id == id);
-            var villa = _db.Villas.FirstOrDefault(v => v.Id == id);
+            var villa = await _db.Villas.FirstOrDefaultAsync(v => v.Id == id);
             if(villa == null)
             {
                 return NotFound();
             }
-            return Ok();
+            return Ok(_mapper.Map<VillaDto>(villa));
         }
 
         //Endpoint que inserta una villa
@@ -59,7 +66,7 @@ namespace Proyecto_API.Controllers
         [ProducesResponseType(201)]
         [ProducesResponseType(400)]
         [ProducesResponseType(500)]
-        public ActionResult <VillaDto> CrearVilla([FromBody] VillaDto villaDto)
+        public async Task<ActionResult <VillaDto>> CrearVilla([FromBody] VillaCreateDto createDto)
         {
             //Validar si los datos obligatorios son llenados
             if (!ModelState.IsValid)
@@ -67,37 +74,23 @@ namespace Proyecto_API.Controllers
                 return BadRequest(ModelState);
             }
             //Validación personalizada (si existe un nombre con la misma villa)
-            if (_db.Villas.FirstOrDefault(v => v.Name.ToLower() == villaDto.Name.ToLower()) !=null)
+            if (await _db.Villas.FirstOrDefaultAsync(v => v.Name.ToLower() == createDto.Name.ToLower()) !=null)
             {
                 ModelState.AddModelError("NombreExiste", "La villa con ese nombre ya existe");
                 return BadRequest(ModelState);
             }
             //Validar si los datos son nulos
-            if(villaDto == null)
+            if(createDto == null)
             {
-                return BadRequest();
-            }
-            if (villaDto.Id > 0)
-            {
-                return StatusCode(StatusCodes.Status500InternalServerError);
+                return BadRequest(createDto);
             }
 
-            Villa modelo = new()
-            {
-                Name = villaDto.Name,
-                Detail = villaDto.Detail,
-                UrlImage = villaDto.UrlImage,
-                Occupants = villaDto.Occupants,
-                Fee = villaDto.Fee,
-                SquareMeter = villaDto.SquareMeter,
-                Amenity = villaDto.Amenity,
+            Villa model = _mapper.Map<Villa>(createDto);
 
-            };
+            await _db.Villas.AddAsync(model);
+            await _db.SaveChangesAsync();
 
-            _db.Villas.Add(modelo);
-            _db.SaveChanges();
-
-            return CreatedAtRoute("GetVilla", new {id=villaDto.Id}, villaDto);
+            return CreatedAtRoute("GetVilla", new {id=model.Id}, model);
         }
 
         //Endpoint que elimina una villa
@@ -105,20 +98,20 @@ namespace Proyecto_API.Controllers
         [ProducesResponseType(204)]
         [ProducesResponseType(400)]
         [ProducesResponseType(404)]
-        public IActionResult DeleteVilla(int id)
+        public async Task<IActionResult> DeleteVilla(int id)
         {
             if (id == 0)
             {
                 return BadRequest();
             }
-            var villa = _db.Villas.FirstOrDefault(v=>v.Id== id);
+            var villa = await _db.Villas.FirstOrDefaultAsync(v => v.Id == id);
             if (villa == null)
             {
                 return NotFound();
             }
             //VillaStore.villaList.Remove(villa);
             _db.Villas.Remove(villa);
-            _db.SaveChanges();
+            await _db.SaveChangesAsync();
 
             return NoContent();
         }
@@ -128,30 +121,17 @@ namespace Proyecto_API.Controllers
         [ProducesResponseType(204)]
         [ProducesResponseType(400)]
         [ProducesResponseType(404)]
-        public IActionResult UpdateVilla(int id, [FromBody] VillaDto villaDto) 
+        public async Task<IActionResult> UpdateVilla(int id, [FromBody] VillaUpdateDto updateDto) 
         { 
-            if (villaDto == null || id!=villaDto.Id) 
+            if (updateDto == null || id!= updateDto.Id) 
             {
                 return BadRequest();
             }
-            //var villa = VillaStore.villaList.FirstOrDefault(v => v.Id == id);
-            //villa.Name = villaDto.Name;
-            //villa.Occupants = villaDto.Occupants;
-            //villa.SquareMeter = villaDto.SquareMeter;
 
-            Villa model = new()
-            {
-                Id = villaDto.Id,
-                Name = villaDto.Name,
-                Detail = villaDto.Detail,
-                UrlImage = villaDto.UrlImage,
-                Occupants = villaDto.Occupants,
-                Fee = villaDto.Fee,
-                SquareMeter = villaDto.SquareMeter,
-                Amenity = villaDto.Amenity,
-            };
+            Villa model = _mapper.Map<Villa>(updateDto);
+
             _db.Villas.Update(model);
-            _db.SaveChanges();
+            await _db.SaveChangesAsync();
             return NoContent();
         }
 
@@ -159,26 +139,16 @@ namespace Proyecto_API.Controllers
         [HttpPatch("{id:int}")]
         [ProducesResponseType(204)]
         [ProducesResponseType(400)]
-        public IActionResult UpdatePartialVilla(int id, JsonPatchDocument<VillaDto> patchDto)
+        public async Task<IActionResult> UpdatePartialVilla(int id, JsonPatchDocument<VillaUpdateDto> patchDto)
         {
             if (patchDto == null || id ==0)
             {
                 return BadRequest();
             }
             //var villa = VillaStore.villaList.FirstOrDefault(v => v.Id == id);
-            var villa = _db.Villas.FirstOrDefault(v => v.Id == id);
+            var villa = await _db.Villas.AsNoTracking().FirstOrDefaultAsync(v => v.Id == id);
 
-            VillaDto villaDto = new()
-            {
-                Id = villa.Id,
-                Name = villa.Name,
-                Detail = villa.Detail,
-                UrlImage = villa.UrlImage,
-                Occupants = villa.Occupants,
-                Fee = villa.Fee,
-                SquareMeter = villa.SquareMeter,
-                Amenity = villa.Amenity,
-            };
+            VillaUpdateDto villaDto = _mapper.Map<VillaUpdateDto>(villa);
 
             if(villa == null) return BadRequest();
 
@@ -188,19 +158,11 @@ namespace Proyecto_API.Controllers
             {
                 return BadRequest(ModelState);
             }
-            Villa model = new()
-            {
-                Id = villaDto.Id,
-                Name = villaDto.Name,
-                Detail = villaDto.Detail,
-                UrlImage = villaDto.UrlImage,
-                Occupants = villaDto.Occupants,
-                Fee = villaDto.Fee,
-                SquareMeter = villaDto.SquareMeter,
-                Amenity = villaDto.Amenity,
-            };
+
+            Villa model = _mapper.Map<Villa>(villaDto);
+
             _db.Villas.Update(model);
-            _db.SaveChanges();
+            await _db.SaveChangesAsync();
             return NoContent();
         }
 
